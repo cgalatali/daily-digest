@@ -278,31 +278,33 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
         print(f"  [!] yt-dlp hatası: {type(e).__name__}: {e}")
 
     if not full_text:
-        # Son çare: yeni youtube-transcript-api >= 0.6 syntax
+        # Supadata.ai API ile transkript çek — cloud IP engeli yok
         try:
-            from youtube_transcript_api import YouTubeTranscriptApi as YTA
-            yta = YTA()
-            # Önce Türkçe dene, sonra İngilizce, sonra hiç dil belirtme
-            for langs in [["tr"], ["tr-TR"], ["en"], None]:
-                try:
-                    if langs:
-                        fetched = yta.fetch(video_id, languages=langs)
+            supadata_key = os.environ.get("SUPADATA_API_KEY", "")
+            if supadata_key:
+                resp = requests.get(
+                    "https://api.supadata.ai/v1/youtube/transcript",
+                    params={"videoId": video_id, "lang": "tr", "text": "true"},
+                    headers={"x-api-key": supadata_key},
+                    timeout=30
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # content alanı düz metin veya segment listesi olabilir
+                    if isinstance(data.get("content"), str):
+                        full_text = data["content"]
+                    elif isinstance(data.get("content"), list):
+                        full_text = " ".join(s.get("text", "") for s in data["content"])
+                    if full_text:
+                        print(f"  ✅ Supadata transkript alındı ({len(full_text)} karakter)")
                     else:
-                        fetched = yta.fetch(video_id)
-                    # Yeni API FetchedTranscript objesi döndürür — iterate et
-                    texts = []
-                    for snippet in fetched:
-                        txt = snippet.text.strip() if hasattr(snippet, "text") else snippet.get("text","").strip()
-                        if txt:
-                            texts.append(txt)
-                    if texts:
-                        full_text = " ".join(texts)
-                        print(f"  ✅ Transkript alındı, dil: {langs}")
-                        break
-                except Exception as le:
-                    print(f"  [!] Dil {langs} başarısız: {le}")
+                        print(f"  [!] Supadata boş döndü: {resp.text[:200]}")
+                else:
+                    print(f"  [!] Supadata hata {resp.status_code}: {resp.text[:200]}")
+            else:
+                print("  [!] SUPADATA_API_KEY secret eksik")
         except Exception as e:
-            print(f"  [!] youtube-transcript-api hatası: {type(e).__name__}: {e}")
+            print(f"  [!] Supadata hatası: {type(e).__name__}: {e}")
 
     if not full_text:
         articles.append({
