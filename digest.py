@@ -282,17 +282,22 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
         print(f"  [!] yt-dlp hatası: {e}")
 
     if not full_text:
-        # Son çare: youtube-transcript-api ile dene
+        # Son çare: mevcut tüm altyazıları listele, hangisi varsa al
         try:
-            fetcher = YouTubeTranscriptApi()
-            for lang in ["tr", "tr-TR", "tr-Hans", "en", "a.tr", "a.en"]:
-                try:
-                    segments = fetcher.fetch(video_id, languages=[lang])
-                    full_text = " ".join(s.text for s in segments)
-                    if full_text:
-                        break
-                except Exception:
-                    pass
+            from youtube_transcript_api import YouTubeTranscriptApi as YTA
+            transcript_list = YTA.list_transcripts(video_id)
+            transcript = None
+            for t in transcript_list:
+                print(f"  📝 Bulunan altyazı: {t.language} ({t.language_code})")
+                if transcript is None:
+                    transcript = t  # ilkini yedek olarak kaydet
+                if "tr" in t.language_code.lower():
+                    transcript = t  # Türkçe bulunursa tercih et
+                    break
+            if transcript:
+                segments = transcript.fetch()
+                full_text = " ".join(s.text for s in segments)
+                print(f"  ✅ Altyazı alındı: {transcript.language} ({transcript.language_code})")
         except Exception as e:
             print(f"  [!] youtube-transcript-api hatası: {e}")
 
