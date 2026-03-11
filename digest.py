@@ -266,8 +266,7 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
                     for event in data.get("events", []):
                         for seg in event.get("segs", []):
                             txt = seg.get("utf8", "").strip()
-                            if txt and txt != "
-":
+                            if txt and txt.strip():
                                 words.append(txt)
                     if words:
                         full_text = " ".join(words)
