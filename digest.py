@@ -1,72 +1,95 @@
 #!/usr/bin/env python3
 """
-Günlük İçerik Özeti - Cumhuriyet (Ergin Yıldızoğlu) + Patreon
+Günlük İçerik Özeti
+- Cumhuriyet: Ergin Yıldızoğlu + Mehmet Ali Güller
+- Patreon: jxlhs + Bureau of Economy
+- YouTube: Cem Gürdeniz (transkript özeti)
 Outlook/Hotmail üzerinden e-posta gönderir.
 """
 
 import os
+import re
 import smtplib
 import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+from youtube_transcript_api import YouTubeTranscriptApi
 import anthropic
 
 # ─── AYARLAR ────────────────────────────────────────────────────────────────
-OUTLOOK_EMAIL   = os.environ["OUTLOOK_EMAIL"]       # gönderici = alıcı
-OUTLOOK_PASSWORD = os.environ["OUTLOOK_PASSWORD"]   # Outlook şifresi
+OUTLOOK_EMAIL     = os.environ["OUTLOOK_EMAIL"]
+OUTLOOK_PASSWORD  = os.environ["OUTLOOK_PASSWORD"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
-# Patreon yazarları — kendi URL'lerinle değiştir
 PATREON_CREATORS = [
-    {"name": "jxlhs",           "url": "https://www.patreon.com/c/jxlhs/posts"},
-    {"name": "Bureau of Economy","url": "https://www.patreon.com/c/bureauofeconomy/posts"},
+    {"name": "jxlhs",             "url": "https://www.patreon.com/c/jxlhs/posts"},
+    {"name": "Bureau of Economy", "url": "https://www.patreon.com/c/bureauofeconomy/posts"},
 ]
 
-CUMHURIYET_AUTHOR_URL = "https://www.cumhuriyet.com.tr/yazarlar/ergin-yildizoglu"
+CUMHURIYET_AUTHORS = [
+    {
+        "name": "Ergin Yıldızoğlu",
+        "url":  "https://www.cumhuriyet.com.tr/yazarlar/ergin-yildizoglu",
+        "slug": "ergin-yildizoglu",
+    },
+    {
+        "name": "Mehmet Ali Güller",
+        "url":  "https://www.cumhuriyet.com.tr/yazarlar/mehmet-ali-guller",
+        "slug": "mehmet-ali-guller",
+    },
+]
+
+YOUTUBE_CHANNELS = [
+    {"name": "Cem Gürdeniz", "url": "https://www.youtube.com/@CemGurdenizz"},
+]
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def summarize(text: str, title: str) -> str:
+def summarize(text: str, title: str, content_type: str = "makale") -> str:
     """Claude API ile metni özetle."""
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    prompt = f"""Aşağıdaki makaleyi Türkçe olarak 4-5 cümleyle özetle.
-Ana argümanı, öne sürülen kanıtları ve sonucu kısaca aktar.
+
+    if content_type == "video":
+        instruction = "Aşağıdaki YouTube video transkriptini Türkçe olarak 5-6 cümleyle özetle. Ana tezleri, önemli argümanları ve sonucu aktar."
+    else:
+        instruction = "Aşağıdaki makaleyi Türkçe olarak 4-5 cümleyle özetle. Ana argümanı, öne sürülen kanıtları ve sonucu kısaca aktar."
+
+    prompt = f"""{instruction}
 Başlık: {title}
 
 Metin:
-{text[:6000]}
+{text[:7000]}
 """
     msg = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=400,
+        max_tokens=500,
         messages=[{"role": "user", "content": prompt}]
     )
     return msg.content[0].text.strip()
 
 
-def fetch_yildizoglu() -> list[dict]:
-    """Cumhuriyet'ten Ergin Yıldızoğlu'nun son yazılarını çek."""
+# ─── CUMHURİYET ─────────────────────────────────────────────────────────────
+
+def fetch_cumhuriyet_author(author: dict) -> list[dict]:
+    """Cumhuriyet yazar sayfasından son yazıları çek."""
     articles = []
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        resp = requests.get(CUMHURIYET_AUTHOR_URL, headers=headers, timeout=15)
+        resp = requests.get(author["url"], headers=headers, timeout=15)
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Yazar sayfasındaki makale linkleri
         links = []
         for a in soup.select("a[href]"):
             href = a["href"]
-            if "/yazarlar/ergin-yildizoglu/" in href and len(href) > 50:
+            if f"/yazarlar/{author['slug']}/" in href and len(href) > 60:
                 full = href if href.startswith("http") else "https://www.cumhuriyet.com.tr" + href
                 if full not in links:
                     links.append(full)
-            if len(links) >= 3:
+            if len(links) >= 2:
                 break
-
-        cutoff = datetime.now() - timedelta(days=2)
 
         for url in links:
             try:
@@ -76,7 +99,6 @@ def fetch_yildizoglu() -> list[dict]:
                 title_tag = s.find("h1")
                 title = title_tag.get_text(strip=True) if title_tag else "Başlık yok"
 
-                # Tarih kontrolü
                 date_tag = s.find("time")
                 pub_date = None
                 if date_tag and date_tag.get("datetime"):
@@ -85,46 +107,46 @@ def fetch_yildizoglu() -> list[dict]:
                     except Exception:
                         pass
 
-                # Makale gövdesi
-                body_tag = s.find("div", class_=lambda c: c and "article" in c.lower()) or \
-                           s.find("div", class_=lambda c: c and "content" in c.lower())
+                body_tag = (
+                    s.find("div", class_=lambda c: c and "article" in c.lower()) or
+                    s.find("div", class_=lambda c: c and "content" in c.lower())
+                )
                 body = body_tag.get_text(" ", strip=True) if body_tag else ""
 
                 if len(body) < 200:
                     continue
 
-                summary = summarize(body, title)
+                summary = summarize(body, title, "makale")
 
                 articles.append({
-                    "source": "Cumhuriyet",
-                    "author": "Ergin Yıldızoğlu",
-                    "title": title,
-                    "url": url,
-                    "date": pub_date.strftime("%d.%m.%Y") if pub_date else "—",
+                    "source":  "Cumhuriyet",
+                    "author":  author["name"],
+                    "title":   title,
+                    "url":     url,
+                    "date":    pub_date.strftime("%d.%m.%Y") if pub_date else "—",
                     "summary": summary,
+                    "type":    "article",
                 })
             except Exception as e:
                 print(f"  [!] Makale çekilemedi: {url} — {e}")
 
     except Exception as e:
-        print(f"[!] Cumhuriyet sayfası çekilemedi: {e}")
+        print(f"[!] Cumhuriyet sayfası çekilemedi ({author['name']}): {e}")
 
     return articles
 
 
+# ─── PATREON ────────────────────────────────────────────────────────────────
+
 def fetch_patreon(creator: dict) -> list[dict]:
-    """Patreon yazarının public postlarını çek (ücretsiz içerikler)."""
+    """Patreon yazarının public postlarını çek."""
     articles = []
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "text/html,application/xhtml+xml",
-    }
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"}
 
     try:
         resp = requests.get(creator["url"], headers=headers, timeout=15)
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Patreon public post başlıkları + linkleri
         post_links = []
         for a in soup.find_all("a", href=True):
             href = a["href"]
@@ -132,7 +154,7 @@ def fetch_patreon(creator: dict) -> list[dict]:
                 full = href if href.startswith("http") else "https://www.patreon.com" + href
                 if full not in post_links:
                     post_links.append(full)
-            if len(post_links) >= 3:
+            if len(post_links) >= 2:
                 break
 
         for url in post_links:
@@ -143,52 +165,165 @@ def fetch_patreon(creator: dict) -> list[dict]:
                 title_tag = s.find("h1") or s.find("h2")
                 title = title_tag.get_text(strip=True) if title_tag else "Başlık yok"
 
-                # Patreon post gövdesi
-                body_div = s.find("div", {"data-tag": "post-body"}) or \
-                           s.find("div", class_=lambda c: c and "post" in (c or "").lower())
+                body_div = (
+                    s.find("div", {"data-tag": "post-body"}) or
+                    s.find("div", class_=lambda c: c and "post" in (c or "").lower())
+                )
                 body = body_div.get_text(" ", strip=True) if body_div else ""
 
-                if len(body) < 100:
-                    summary = "⚠️ Bu içerik üyelere özel ya da scraping engelliyor."
-                else:
-                    summary = summarize(body, title)
+                summary = (
+                    "⚠️ Bu içerik üyelere özel ya da scraping engelliyor."
+                    if len(body) < 100
+                    else summarize(body, title, "makale")
+                )
 
                 articles.append({
-                    "source": "Patreon",
-                    "author": creator["name"],
-                    "title": title,
-                    "url": url,
-                    "date": "—",
+                    "source":  "Patreon",
+                    "author":  creator["name"],
+                    "title":   title,
+                    "url":     url,
+                    "date":    "—",
                     "summary": summary,
+                    "type":    "article",
                 })
             except Exception as e:
                 print(f"  [!] Patreon post çekilemedi: {url} — {e}")
 
     except Exception as e:
-        print(f"[!] Patreon sayfası çekilemedi ({creator['name']}): {e}")
+        print(f"[!] Patreon çekilemedi ({creator['name']}): {e}")
 
     return articles
 
 
-def build_html(all_articles: list[dict]) -> str:
-    """Güzel HTML e-posta içeriği oluştur."""
-    today = datetime.now().strftime("%d %B %Y, %A")
+# ─── YOUTUBE ────────────────────────────────────────────────────────────────
 
+def get_latest_video_id(channel_url: str) -> tuple[str, str] | None:
+    """Kanalın son video ID ve başlığını çek."""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        # /videos sayfasından son videoyu al
+        resp = requests.get(channel_url + "/videos", headers=headers, timeout=15)
+        # YouTube sayfasında video ID'leri JSON içinde gömülü
+        ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
+        titles = re.findall(r'"title":\{"runs":\[\{"text":"([^"]+)"', resp.text)
+
+        if ids:
+            video_id = ids[0]
+            title = titles[0] if titles else "Başlık yok"
+            return video_id, title
+    except Exception as e:
+        print(f"  [!] YouTube kanal çekilemedi: {e}")
+    return None
+
+
+def fetch_youtube_channel(channel: dict) -> list[dict]:
+    """YouTube kanalının son videosunu transkriptle özetle."""
+    articles = []
+
+    result = get_latest_video_id(channel["url"])
+    if not result:
+        print(f"  [!] {channel['name']} için video bulunamadı.")
+        return articles
+
+    video_id, title = result
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    try:
+        # Önce Türkçe, yoksa otomatik altyazı dene
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = None
+
+        for lang in ["tr", "en"]:
+            try:
+                transcript = transcript_list.find_transcript([lang])
+                break
+            except Exception:
+                pass
+
+        # Otomatik oluşturulmuş altyazıyı dene
+        if not transcript:
+            try:
+                transcript = transcript_list.find_generated_transcript(["tr", "en"])
+            except Exception:
+                pass
+
+        if not transcript:
+            articles.append({
+                "source":  "YouTube",
+                "author":  channel["name"],
+                "title":   title,
+                "url":     video_url,
+                "date":    "—",
+                "summary": "⚠️ Bu video için altyazı/transkript bulunamadı.",
+                "type":    "video",
+            })
+            return articles
+
+        segments = transcript.fetch()
+        full_text = " ".join(s["text"] for s in segments)
+        summary = summarize(full_text, title, "video")
+
+        articles.append({
+            "source":  "YouTube",
+            "author":  channel["name"],
+            "title":   title,
+            "url":     video_url,
+            "date":    datetime.now().strftime("%d.%m.%Y"),
+            "summary": summary,
+            "type":    "video",
+        })
+
+    except Exception as e:
+        print(f"  [!] Transkript alınamadı ({video_id}): {e}")
+        articles.append({
+            "source":  "YouTube",
+            "author":  channel["name"],
+            "title":   title,
+            "url":     video_url,
+            "date":    "—",
+            "summary": "⚠️ Transkript alınırken hata oluştu.",
+            "type":    "video",
+        })
+
+    return articles
+
+
+# ─── HTML & EMAIL ────────────────────────────────────────────────────────────
+
+SOURCE_COLORS = {
+    "Cumhuriyet": "#c0392b",
+    "Patreon":    "#8e44ad",
+    "YouTube":    "#e74c3c",
+}
+
+SOURCE_ICONS = {
+    "Cumhuriyet": "📰",
+    "Patreon":    "🎨",
+    "YouTube":    "🎬",
+}
+
+
+def build_html(all_articles: list[dict]) -> str:
+    today = datetime.now().strftime("%d %B %Y, %A")
     cards = ""
+
     for a in all_articles:
-        source_color = "#c0392b" if a["source"] == "Cumhuriyet" else "#8e44ad"
+        color = SOURCE_COLORS.get(a["source"], "#555")
+        icon  = SOURCE_ICONS.get(a["source"], "📄")
+        link_label = "→ Videoyu izle" if a["type"] == "video" else "→ Tam yazıyı oku"
+
         cards += f"""
         <div style="background:#fff;border-radius:10px;padding:20px;margin-bottom:20px;
-                    box-shadow:0 2px 6px rgba(0,0,0,0.08);border-left:4px solid {source_color};">
+                    box-shadow:0 2px 6px rgba(0,0,0,0.08);border-left:4px solid {color};">
           <div style="font-size:11px;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
-            {a['source']} · {a['author']} · {a['date']}
+            {icon} {a['source']} · {a['author']} · {a['date']}
           </div>
           <a href="{a['url']}" style="color:#1a1a2e;font-size:17px;font-weight:700;text-decoration:none;">
             {a['title']}
           </a>
           <p style="color:#444;font-size:14px;line-height:1.7;margin-top:10px;">{a['summary']}</p>
-          <a href="{a['url']}" style="font-size:13px;color:{source_color};text-decoration:none;">
-            → Tam yazıyı oku
+          <a href="{a['url']}" style="font-size:13px;color:{color};text-decoration:none;">
+            {link_label}
           </a>
         </div>
         """
@@ -196,40 +331,34 @@ def build_html(all_articles: list[dict]) -> str:
     if not cards:
         cards = "<p style='color:#888;'>Bugün yeni içerik bulunamadı.</p>"
 
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="utf-8"></head>
-    <body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,sans-serif;">
-      <div style="max-width:640px;margin:30px auto;padding:0 16px;">
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:640px;margin:30px auto;padding:0 16px;">
 
-        <!-- Header -->
-        <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);
-                    border-radius:12px;padding:28px;margin-bottom:24px;text-align:center;">
-          <div style="font-size:28px;margin-bottom:6px;">📰</div>
-          <h1 style="color:#fff;margin:0;font-size:22px;">Günlük İçerik Özeti</h1>
-          <p style="color:#a0aec0;margin:6px 0 0;font-size:14px;">{today}</p>
-        </div>
+    <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);
+                border-radius:12px;padding:28px;margin-bottom:24px;text-align:center;">
+      <div style="font-size:28px;margin-bottom:6px;">📰</div>
+      <h1 style="color:#fff;margin:0;font-size:22px;">Günlük İçerik Özeti</h1>
+      <p style="color:#a0aec0;margin:6px 0 0;font-size:14px;">{today}</p>
+    </div>
 
-        {cards}
+    {cards}
 
-        <!-- Footer -->
-        <div style="text-align:center;padding:16px;color:#aaa;font-size:12px;">
-          Bu e-posta otomatik olarak oluşturulmuştur · Claude API ile özetlenmiştir
-        </div>
-      </div>
-    </body>
-    </html>
-    """
+    <div style="text-align:center;padding:16px;color:#aaa;font-size:12px;">
+      Bu e-posta otomatik olarak oluşturulmuştur · Claude API ile özetlenmiştir
+    </div>
+  </div>
+</body>
+</html>"""
 
 
 def send_email(html_body: str, article_count: int):
-    """Outlook SMTP üzerinden e-posta gönder."""
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"📰 Günlük Özet — {article_count} yeni içerik · {datetime.now().strftime('%d.%m.%Y')}"
+    msg["Subject"] = f"📰 Günlük Özet — {article_count} içerik · {datetime.now().strftime('%d.%m.%Y')}"
     msg["From"]    = OUTLOOK_EMAIL
-    msg["To"]      = OUTLOOK_EMAIL  # kendine gönder
-
+    msg["To"]      = OUTLOOK_EMAIL
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     with smtplib.SMTP("smtp-mail.outlook.com", 587) as server:
@@ -237,23 +366,28 @@ def send_email(html_body: str, article_count: int):
         server.starttls()
         server.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
         server.sendmail(OUTLOOK_EMAIL, OUTLOOK_EMAIL, msg.as_string())
-        print(f"✅ E-posta gönderildi: {article_count} makale")
+        print(f"✅ E-posta gönderildi: {article_count} içerik")
 
+
+# ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def main():
     print(f"🚀 Digest başlıyor... [{datetime.now().strftime('%H:%M')}]")
-
     all_articles = []
 
-    print("📰 Cumhuriyet çekiliyor...")
-    all_articles += fetch_yildizoglu()
+    for author in CUMHURIYET_AUTHORS:
+        print(f"📰 Cumhuriyet çekiliyor: {author['name']}...")
+        all_articles += fetch_cumhuriyet_author(author)
 
     for creator in PATREON_CREATORS:
         print(f"🎨 Patreon çekiliyor: {creator['name']}...")
         all_articles += fetch_patreon(creator)
 
-    print(f"   Toplam {len(all_articles)} içerik bulundu.")
+    for channel in YOUTUBE_CHANNELS:
+        print(f"🎬 YouTube çekiliyor: {channel['name']}...")
+        all_articles += fetch_youtube_channel(channel)
 
+    print(f"   Toplam {len(all_articles)} içerik bulundu.")
     html = build_html(all_articles)
     send_email(html, len(all_articles))
 
