@@ -217,7 +217,8 @@ def get_latest_video_id(channel_url: str) -> tuple[str, str] | None:
 
 
 def fetch_youtube_channel(channel: dict) -> list[dict]:
-    """YouTube kanalının son videosunu transkriptle özetle (yeni API)."""
+    """YouTube kanalının son videosunu yt-dlp ile transkriptle özetle."""
+    import subprocess, json, tempfile, os
     articles = []
 
     result = get_latest_video_id(channel["url"])
@@ -227,64 +228,96 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
 
     video_id, title = result
     video_url = f"https://www.youtube.com/watch?v={video_id}"
+    full_text = None
 
+    # yt-dlp ile tüm dillerde otomatik altyazı dene
     try:
-        # Yeni youtube-transcript-api >= 0.6 syntax
-        full_text = None
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cmd = [
+                "yt-dlp",
+                "--write-auto-sub",
+                "--write-sub",
+                "--sub-langs", "tr,tr-TR,en,en-US",
+                "--sub-format", "vtt",
+                "--skip-download",
+                "--output", os.path.join(tmpdir, "sub"),
+                video_url
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=60)
 
-        for lang in ["tr", "en"]:
-            try:
-                fetcher = YouTubeTranscriptApi()
-                segments = fetcher.fetch(video_id, languages=[lang])
-                full_text = " ".join(s.text for s in segments)
-                break
-            except Exception:
-                pass
+            # İndirilen vtt dosyalarını bul
+            vtt_files = [f for f in os.listdir(tmpdir) if f.endswith(".vtt")]
+            # Türkçeyi önceliklendir
+            vtt_files.sort(key=lambda f: (0 if "tr" in f else 1))
 
-        if not full_text:
-            # Dil belirtmeden dene (otomatik altyazı)
-            try:
-                fetcher = YouTubeTranscriptApi()
-                segments = fetcher.fetch(video_id)
-                full_text = " ".join(s.text for s in segments)
-            except Exception:
-                pass
-
-        if not full_text:
-            articles.append({
-                "source":  "YouTube",
-                "author":  channel["name"],
-                "title":   title,
-                "url":     video_url,
-                "date":    "—",
-                "summary": "⚠️ Bu video için altyazı/transkript bulunamadı.",
-                "type":    "video",
-            })
-            return articles
-
-        summary = summarize(full_text, title, "video")
-
-        articles.append({
-            "source":  "YouTube",
-            "author":  channel["name"],
-            "title":   title,
-            "url":     video_url,
-            "date":    datetime.now().strftime("%d.%m.%Y"),
-            "summary": summary,
-            "type":    "video",
-        })
-
+            for vtt_file in vtt_files:
+                with open(os.path.join(tmpdir, vtt_file), "r", encoding="utf-8") as f:
+                    raw = f.read()
+                # VTT formatından düz metni çıkar
+                lines = []
+                for line in raw.split("\n"):
+                    line = line.strip()
+                    if (line and
+                        not line.startswith("WEBVTT") and
+                        not line.startswith("NOTE") and
+                        "-->" not in line and
+                        not line.isdigit()):
+                        # HTML tag temizle
+                        import re as _re
+                        line = _re.sub(r"<[^>]+>", "", line)
+                        if line:
+                            lines.append(line)
+                if lines:
+                    # Tekrar eden satırları temizle
+                    seen = set()
+                    clean = []
+                    for l in lines:
+                        if l not in seen:
+                            seen.add(l)
+                            clean.append(l)
+                    full_text = " ".join(clean)
+                    print(f"  ✅ Transkript bulundu: {vtt_file}")
+                    break
     except Exception as e:
-        print(f"  [!] Transkript alınamadı ({video_id}): {e}")
+        print(f"  [!] yt-dlp hatası: {e}")
+
+    if not full_text:
+        # Son çare: youtube-transcript-api ile dene
+        try:
+            fetcher = YouTubeTranscriptApi()
+            for lang in ["tr", "tr-TR", "tr-Hans", "en", "a.tr", "a.en"]:
+                try:
+                    segments = fetcher.fetch(video_id, languages=[lang])
+                    full_text = " ".join(s.text for s in segments)
+                    if full_text:
+                        break
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"  [!] youtube-transcript-api hatası: {e}")
+
+    if not full_text:
         articles.append({
             "source":  "YouTube",
             "author":  channel["name"],
             "title":   title,
             "url":     video_url,
             "date":    "—",
-            "summary": "⚠️ Transkript alınırken hata oluştu.",
+            "summary": "⚠️ Bu video için transkript bulunamadı.",
             "type":    "video",
         })
+        return articles
+
+    summary = summarize(full_text, title, "video")
+    articles.append({
+        "source":  "YouTube",
+        "author":  channel["name"],
+        "title":   title,
+        "url":     video_url,
+        "date":    datetime.now().strftime("%d.%m.%Y"),
+        "summary": summary,
+        "type":    "video",
+    })
 
     return articles
 
