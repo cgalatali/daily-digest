@@ -22,6 +22,7 @@ import anthropic
 OUTLOOK_EMAIL     = os.environ["OUTLOOK_EMAIL"]
 OUTLOOK_PASSWORD  = os.environ["OUTLOOK_PASSWORD"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+EXTRA_RECIPIENT   = "cgalatali@hotmail.com"  # Hotmail'e de gönder
 
 PATREON_CREATORS = [
     {"name": "jxlhs",             "url": "https://www.patreon.com/c/jxlhs/posts"},
@@ -43,6 +44,7 @@ CUMHURIYET_AUTHORS = [
 
 YOUTUBE_CHANNELS = [
     {"name": "Cem Gürdeniz", "url": "https://www.youtube.com/@CemGurdenizz"},
+    {"name": "Hasan Hoca",   "url": "https://www.youtube.com/playlist?list=PLyqYrMRr_KhCaVo2lPhTD83V-MX7Lz8FS", "type": "playlist"},
 ]
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -152,6 +154,7 @@ def fetch_cumhuriyet_author(author: dict) -> list[dict]:
                     "url":     url,
                     "date":    pub_date.strftime("%d.%m.%Y") if pub_date else "—",
                     "summary": summary,
+                    "body":    body,
                     "type":    "article",
                 })
             except Exception as e:
@@ -224,13 +227,16 @@ def fetch_patreon(creator: dict) -> list[dict]:
 
 # ─── YOUTUBE ────────────────────────────────────────────────────────────────
 
-def get_latest_video_id(channel_url: str) -> tuple[str, str] | None:
-    """Kanalın son video ID ve başlığını çek."""
+def get_latest_video_id(channel_url: str, url_type: str = "channel") -> tuple[str, str] | None:
+    """Kanalın veya playlist'in son video ID ve başlığını çek."""
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        # /videos sayfasından son videoyu al
-        resp = requests.get(channel_url + "/videos", headers=headers, timeout=15)
-        # YouTube sayfasında video ID'leri JSON içinde gömülü
+        if url_type == "playlist":
+            fetch_url = channel_url
+        else:
+            fetch_url = channel_url + "/videos"
+
+        resp = requests.get(fetch_url, headers=headers, timeout=15)
         ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
         titles = re.findall(r'"title":\{"runs":\[\{"text":"([^"]+)"', resp.text)
 
@@ -239,7 +245,7 @@ def get_latest_video_id(channel_url: str) -> tuple[str, str] | None:
             title = titles[0] if titles else "Başlık yok"
             return video_id, title
     except Exception as e:
-        print(f"  [!] YouTube kanal çekilemedi: {e}")
+        print(f"  [!] YouTube çekilemedi: {e}")
     return None
 
 
@@ -248,7 +254,7 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
     import subprocess, json, tempfile, os
     articles = []
 
-    result = get_latest_video_id(channel["url"])
+    result = get_latest_video_id(channel["url"], channel.get("type", "channel"))
     if not result:
         print(f"  [!] {channel['name']} için video bulunamadı.")
         return articles
@@ -381,7 +387,21 @@ def build_html(all_articles: list[dict]) -> str:
     for a in all_articles:
         color = SOURCE_COLORS.get(a["source"], "#555")
         icon  = SOURCE_ICONS.get(a["source"], "📄")
-        link_label = "→ Videoyu izle" if a["type"] == "video" else "→ Tam yazıyı oku"
+        is_video = a["type"] == "video"
+
+        # Videolar için "izle" linki, makaleler için tam metin emailda
+        if is_video:
+            footer = f'''<a href="{a["url"]}" style="font-size:13px;color:{color};text-decoration:none;">→ Videoyu izle</a>'''
+        else:
+            # Makale tam metni — varsa göster, yoksa link
+            full_body = a.get("body", "")
+            if full_body:
+                footer = f'''<details style="margin-top:12px;">
+              <summary style="font-size:13px;color:{color};cursor:pointer;font-weight:600;">→ Tam yazıyı oku</summary>
+              <div style="margin-top:12px;font-size:14px;color:#333;line-height:1.8;border-top:1px solid #eee;padding-top:12px;">{full_body}</div>
+            </details>'''
+            else:
+                footer = f'''<a href="{a["url"]}" style="font-size:13px;color:{color};text-decoration:none;">→ Siteye git</a>'''
 
         cards += f"""
         <div style="background:#fff;border-radius:10px;padding:20px;margin-bottom:20px;
@@ -389,13 +409,11 @@ def build_html(all_articles: list[dict]) -> str:
           <div style="font-size:11px;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">
             {icon} {a['source']} · {a['author']} · {a['date']}
           </div>
-          <a href="{a['url']}" style="color:#1a1a2e;font-size:17px;font-weight:700;text-decoration:none;">
+          <div style="color:#1a1a2e;font-size:17px;font-weight:700;">
             {a['title']}
-          </a>
+          </div>
           <p style="color:#444;font-size:14px;line-height:1.7;margin-top:10px;">{a['summary']}</p>
-          <a href="{a['url']}" style="font-size:13px;color:{color};text-decoration:none;">
-            {link_label}
-          </a>
+          {footer}
         </div>
         """
 
@@ -427,17 +445,18 @@ def build_html(all_articles: list[dict]) -> str:
 
 def send_email(html_body: str, article_count: int):
     msg = MIMEMultipart("alternative")
+    recipients = [OUTLOOK_EMAIL, EXTRA_RECIPIENT]
     msg["Subject"] = f"📰 Günlük Özet — {article_count} içerik · {datetime.now().strftime('%d.%m.%Y')}"
     msg["From"]    = OUTLOOK_EMAIL
-    msg["To"]      = OUTLOOK_EMAIL
+    msg["To"]      = ", ".join(recipients)
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.ehlo()
         server.starttls()
         server.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
-        server.sendmail(OUTLOOK_EMAIL, OUTLOOK_EMAIL, msg.as_string())
-        print(f"✅ E-posta gönderildi: {article_count} içerik")
+        server.sendmail(OUTLOOK_EMAIL, recipients, msg.as_string())
+        print(f"✅ E-posta gönderildi: {article_count} içerik → {recipients}")
 
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────
