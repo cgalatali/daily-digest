@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Bağımlılıkları yükle
-        run: pip install requests beautifulsoup4 anthropic youtube-transcript-api
+        run: pip install requests beautifulsoup4 anthropic youtube-transcript-api yt-dlp
 
       - name: Digest çalıştır
         env:
