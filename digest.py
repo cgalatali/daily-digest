@@ -230,56 +230,53 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     full_text = None
 
-    # yt-dlp ile tüm dillerde otomatik altyazı dene
+    # yt-dlp ile altyazı çek — tüm diller, JSON formatında
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, "sub")
             cmd = [
                 "yt-dlp",
                 "--write-auto-sub",
                 "--write-sub",
-                "--sub-langs", "tr,tr-TR,en,en-US",
-                "--sub-format", "vtt",
+                "--sub-langs", "all",          # tüm dilleri dene
+                "--sub-format", "json3",        # JSON format — parse kolay
                 "--skip-download",
-                "--output", os.path.join(tmpdir, "sub"),
+                "--no-warnings",
+                "--output", out_path,
                 video_url
             ]
-            subprocess.run(cmd, capture_output=True, timeout=60)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            print(f"  yt-dlp stdout: {result.stdout[:300]}")
+            print(f"  yt-dlp stderr: {result.stderr[:300]}")
 
-            # İndirilen vtt dosyalarını bul
-            vtt_files = [f for f in os.listdir(tmpdir) if f.endswith(".vtt")]
-            # Türkçeyi önceliklendir
-            vtt_files.sort(key=lambda f: (0 if "tr" in f else 1))
+            all_files = os.listdir(tmpdir)
+            print(f"  İndirilen dosyalar: {all_files}")
 
-            for vtt_file in vtt_files:
-                with open(os.path.join(tmpdir, vtt_file), "r", encoding="utf-8") as f:
-                    raw = f.read()
-                # VTT formatından düz metni çıkar
-                lines = []
-                for line in raw.split("\n"):
-                    line = line.strip()
-                    if (line and
-                        not line.startswith("WEBVTT") and
-                        not line.startswith("NOTE") and
-                        "-->" not in line and
-                        not line.isdigit()):
-                        # HTML tag temizle
-                        import re as _re
-                        line = _re.sub(r"<[^>]+>", "", line)
-                        if line:
-                            lines.append(line)
-                if lines:
-                    # Tekrar eden satırları temizle
-                    seen = set()
-                    clean = []
-                    for l in lines:
-                        if l not in seen:
-                            seen.add(l)
-                            clean.append(l)
-                    full_text = " ".join(clean)
-                    print(f"  ✅ Transkript bulundu: {vtt_file}")
-                    break
+            # Türkçeyi önce, sonra diğerleri
+            json_files = [f for f in all_files if f.endswith(".json3")]
+            json_files.sort(key=lambda f: (0 if "tr" in f.lower() else 1))
+
+            for jfile in json_files:
+                try:
+                    import json as _json
+                    with open(os.path.join(tmpdir, jfile), "r", encoding="utf-8") as f:
+                        data = _json.load(f)
+                    # json3 formatı: events > segs > utf8
+                    words = []
+                    for event in data.get("events", []):
+                        for seg in event.get("segs", []):
+                            txt = seg.get("utf8", "").strip()
+                            if txt and txt != "
+":
+                                words.append(txt)
+                    if words:
+                        full_text = " ".join(words)
+                        print(f"  ✅ Transkript bulundu: {jfile}")
+                        break
+                except Exception as je:
+                    print(f"  [!] JSON parse hatası {jfile}: {je}")
     except Exception as e:
-        print(f"  [!] yt-dlp hatası: {e}")
+        print(f"  [!] yt-dlp hatası: {type(e).__name__}: {e}")
 
     if not full_text:
         # Son çare: mevcut tüm altyazıları listele, hangisi varsa al
@@ -299,7 +296,7 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
                 full_text = " ".join(s.text for s in segments)
                 print(f"  ✅ Altyazı alındı: {transcript.language} ({transcript.language_code})")
         except Exception as e:
-            print(f"  [!] youtube-transcript-api hatası: {e}")
+            print(f"  [!] youtube-transcript-api hatası: {type(e).__name__}: {e}")
 
     if not full_text:
         articles.append({
