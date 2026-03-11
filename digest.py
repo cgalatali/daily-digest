@@ -380,6 +380,25 @@ SOURCE_ICONS = {
 }
 
 
+def md_to_html(text: str) -> str:
+    """Basit markdown HTML donusumu."""
+    import re as _re
+    text = _re.sub(r"[*][*](.+?)[*][*]", r"<strong>\1</strong>", text)
+    lines = text.split("\n")
+    html_lines = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            html_lines.append("<br>")
+        elif line.startswith(("\U0001f3af", "\U0001f4cc", "\U0001f4a1", "\U0001f51a")):
+            html_lines.append(f"<div style=\'margin:10px 0 4px;font-weight:600;\'>{line}</div>")
+        elif line.startswith("\u2022") or (len(line) > 1 and line[:2] == "- "):
+            html_lines.append(f"<div style=\'margin:3px 0 3px 16px;\'>{line}</div>")
+        else:
+            html_lines.append(f"<div style=\'margin:3px 0;\'>{line}</div>")
+    return "\n".join(html_lines)
+
+
 def build_html(all_articles: list[dict]) -> str:
     today = datetime.now().strftime("%d %B %Y, %A")
     cards = ""
@@ -412,7 +431,7 @@ def build_html(all_articles: list[dict]) -> str:
           <div style="color:#1a1a2e;font-size:17px;font-weight:700;">
             {a['title']}
           </div>
-          <p style="color:#444;font-size:14px;line-height:1.7;margin-top:10px;">{a['summary']}</p>
+          <div style="color:#444;font-size:14px;line-height:1.8;margin-top:10px;">{md_to_html(a['summary'])}</div>
           {footer}
         </div>
         """
