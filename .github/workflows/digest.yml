@@ -1,0 +1,30 @@
+name: Günlük İçerik Özeti
+
+on:
+  schedule:
+    # Her sabah 07:00 Istanbul saati = 04:00 UTC
+    - cron: "0 4 * * *"
+  workflow_dispatch:   # Manuel tetikleme (test için)
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repo'yu çek
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bağımlılıkları yükle
+        run: pip install requests beautifulsoup4 anthropic
+
+      - name: Digest çalıştır
+        env:
+          OUTLOOK_EMAIL:    ${{ secrets.OUTLOOK_EMAIL }}
+          OUTLOOK_PASSWORD: ${{ secrets.OUTLOOK_PASSWORD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python digest.py
