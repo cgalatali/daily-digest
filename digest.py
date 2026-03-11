@@ -278,22 +278,29 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
         print(f"  [!] yt-dlp hatası: {type(e).__name__}: {e}")
 
     if not full_text:
-        # Son çare: mevcut tüm altyazıları listele, hangisi varsa al
+        # Son çare: yeni youtube-transcript-api >= 0.6 syntax
         try:
             from youtube_transcript_api import YouTubeTranscriptApi as YTA
-            transcript_list = YTA.list_transcripts(video_id)
-            transcript = None
-            for t in transcript_list:
-                print(f"  📝 Bulunan altyazı: {t.language} ({t.language_code})")
-                if transcript is None:
-                    transcript = t  # ilkini yedek olarak kaydet
-                if "tr" in t.language_code.lower():
-                    transcript = t  # Türkçe bulunursa tercih et
-                    break
-            if transcript:
-                segments = transcript.fetch()
-                full_text = " ".join(s.text for s in segments)
-                print(f"  ✅ Altyazı alındı: {transcript.language} ({transcript.language_code})")
+            yta = YTA()
+            # Önce Türkçe dene, sonra İngilizce, sonra hiç dil belirtme
+            for langs in [["tr"], ["tr-TR"], ["en"], None]:
+                try:
+                    if langs:
+                        fetched = yta.fetch(video_id, languages=langs)
+                    else:
+                        fetched = yta.fetch(video_id)
+                    # Yeni API FetchedTranscript objesi döndürür — iterate et
+                    texts = []
+                    for snippet in fetched:
+                        txt = snippet.text.strip() if hasattr(snippet, "text") else snippet.get("text","").strip()
+                        if txt:
+                            texts.append(txt)
+                    if texts:
+                        full_text = " ".join(texts)
+                        print(f"  ✅ Transkript alındı, dil: {langs}")
+                        break
+                except Exception as le:
+                    print(f"  [!] Dil {langs} başarısız: {le}")
         except Exception as e:
             print(f"  [!] youtube-transcript-api hatası: {type(e).__name__}: {e}")
 
