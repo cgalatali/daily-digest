@@ -52,19 +52,46 @@ def summarize(text: str, title: str, content_type: str = "makale") -> str:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
     if content_type == "video":
-        instruction = "Aşağıdaki YouTube video transkriptini Türkçe olarak 5-6 cümleyle özetle. Ana tezleri, önemli argümanları ve sonucu aktar."
+        instruction = """Sen deneyimli bir jeopolitik ve strateji analistisin. 
+Aşağıdaki YouTube video transkriptini izlemiş gibi detaylı bir şekilde özetle.
+
+Şu formatta yaz:
+🎯 **Ana Tez:** (1-2 cümle — videonun temel argümanı)
+
+📌 **Ele Alınan Başlıklar:**
+• (her ana konuyu madde madde, 1-2 cümleyle açıkla)
+
+💡 **Öne Çıkan Görüşler:** (konuşmacının özgün tespitleri veya dikkat çekici iddiaları)
+
+🔚 **Sonuç:** (videonun genel çıkarımı veya çağrısı)
+
+Uzman bakış açısıyla, sanki videoyu bizzat izlemiş gibi yaz. Türkçe olsun."""
     else:
-        instruction = "Aşağıdaki makaleyi Türkçe olarak 4-5 cümleyle özetle. Ana argümanı, öne sürülen kanıtları ve sonucu kısaca aktar."
+        instruction = """Sen deneyimli bir siyasi/ekonomi analistisin.
+Aşağıdaki makaleyi okumuş gibi detaylı özetle.
+
+Şu formatta yaz:
+🎯 **Ana Argüman:** (yazarın temel tezi, 1-2 cümle)
+
+📌 **Ele Alınan Başlıklar:**
+• (her ana konuyu madde madde, 1-2 cümleyle açıkla)
+
+💡 **Öne Çıkan Tespitler:** (yazarın dikkat çekici iddiaları veya özgün yorumları)
+
+🔚 **Sonuç:** (makalenin genel çıkarımı)
+
+Uzman bakış açısıyla, sanki makaleyi bizzat okumuş gibi yaz. Türkçe olsun."""
 
     prompt = f"""{instruction}
+
 Başlık: {title}
 
 Metin:
-{text[:7000]}
+{text[:9000]}
 """
     msg = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=500,
+        max_tokens=900,
         messages=[{"role": "user", "content": prompt}]
     )
     return msg.content[0].text.strip()
