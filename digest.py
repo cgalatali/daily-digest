@@ -217,7 +217,7 @@ def get_latest_video_id(channel_url: str) -> tuple[str, str] | None:
 
 
 def fetch_youtube_channel(channel: dict) -> list[dict]:
-    """YouTube kanalının son videosunu transkriptle özetle."""
+    """YouTube kanalının son videosunu transkriptle özetle (yeni API)."""
     articles = []
 
     result = get_latest_video_id(channel["url"])
@@ -229,25 +229,28 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
     video_url = f"https://www.youtube.com/watch?v={video_id}"
 
     try:
-        # Önce Türkçe, yoksa otomatik altyazı dene
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = None
+        # Yeni youtube-transcript-api >= 0.6 syntax
+        full_text = None
 
         for lang in ["tr", "en"]:
             try:
-                transcript = transcript_list.find_transcript([lang])
+                fetcher = YouTubeTranscriptApi()
+                segments = fetcher.fetch(video_id, languages=[lang])
+                full_text = " ".join(s.text for s in segments)
                 break
             except Exception:
                 pass
 
-        # Otomatik oluşturulmuş altyazıyı dene
-        if not transcript:
+        if not full_text:
+            # Dil belirtmeden dene (otomatik altyazı)
             try:
-                transcript = transcript_list.find_generated_transcript(["tr", "en"])
+                fetcher = YouTubeTranscriptApi()
+                segments = fetcher.fetch(video_id)
+                full_text = " ".join(s.text for s in segments)
             except Exception:
                 pass
 
-        if not transcript:
+        if not full_text:
             articles.append({
                 "source":  "YouTube",
                 "author":  channel["name"],
@@ -259,8 +262,6 @@ def fetch_youtube_channel(channel: dict) -> list[dict]:
             })
             return articles
 
-        segments = transcript.fetch()
-        full_text = " ".join(s["text"] for s in segments)
         summary = summarize(full_text, title, "video")
 
         articles.append({
