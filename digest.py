@@ -362,7 +362,7 @@ def send_email(html_body: str, article_count: int):
     msg["To"]      = OUTLOOK_EMAIL
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    with smtplib.SMTP("smtp.office365.com", 587) as server:
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.ehlo()
         server.starttls()
         server.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
