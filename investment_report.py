@@ -405,7 +405,7 @@ def send_email(html_content: str, subject: str):
 
     msg.attach(MIMEText(html_content, "html", "utf-8"))
 
-    with smtplib.SMTP("smtp.office365.com", 587) as server:
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
         server.ehlo()
         server.starttls()
         server.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
