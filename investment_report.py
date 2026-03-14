@@ -16,9 +16,8 @@ import xml.etree.ElementTree as ET
 
 # ── Anthropic API ──────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-GMAIL_USER        = os.environ["GMAIL_USER"]
-GMAIL_APP_PASSWORD= os.environ["GMAIL_APP_PASSWORD"]
-GMAIL_TO          = os.environ.get("GMAIL_TO", GMAIL_USER)
+OUTLOOK_EMAIL     = os.environ["OUTLOOK_EMAIL"]
+OUTLOOK_PASSWORD  = os.environ["OUTLOOK_PASSWORD"]
 
 TODAY = datetime.utcnow().strftime("%d %B %Y")
 TODAY_SHORT = datetime.utcnow().strftime("%Y-%m-%d")
@@ -398,18 +397,20 @@ def build_email_html(report_content: str, market_prices: dict) -> str:
 
 
 def send_email(html_content: str, subject: str):
-    """Gmail ile email gönderir"""
+    """Outlook ile email gönderir"""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = GMAIL_USER
-    msg["To"]      = GMAIL_TO
+    msg["From"]    = OUTLOOK_EMAIL
+    msg["To"]      = OUTLOOK_EMAIL
 
     msg.attach(MIMEText(html_content, "html", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_USER, GMAIL_TO, msg.as_string())
-    print(f"Email gönderildi → {GMAIL_TO}")
+    with smtplib.SMTP("smtp.office365.com", 587) as server:
+        server.ehlo()
+        server.starttls()
+        server.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
+        server.sendmail(OUTLOOK_EMAIL, OUTLOOK_EMAIL, msg.as_string())
+    print(f"Email gönderildi → {OUTLOOK_EMAIL}")
 
 
 def main():
@@ -451,7 +452,7 @@ def main():
     
     spx = market_prices.get("S&P 500", {})
     direction = "▲" if spx.get("change_pct", 0) > 0 else "▼"
-    subject = f"📊 Günlük Yatırım Raporu | {TODAY} | S&P {spx.get('price',''):.0f} {direction}{abs(spx.get('change_pct',0)):.1f}%"
+    subject = f"📊 Günlük Yatırım Raporu | {TODAY} | S&P {spx.get('price', 0):.0f} {direction}{abs(spx.get('change_pct', 0)):.1f}%"
 
     send_email(html, subject)
     print(f"\n✅ Tamamlandı — {TODAY}")
