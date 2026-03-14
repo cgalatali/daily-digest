@@ -202,7 +202,7 @@ def call_claude(prompt: str, system: str) -> str:
     """Claude API çağrısı"""
     payload = json.dumps({
         "model": "claude-sonnet-4-6",
-        "max_tokens": 8000,
+        "max_tokens": 6000,
         "system": system,
         "messages": [{"role": "user", "content": prompt}]
     }).encode("utf-8")
@@ -216,7 +216,7 @@ def call_claude(prompt: str, system: str) -> str:
             "content-type": "application/json",
         }
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=300) as resp:
         result = json.loads(resp.read())
     return result["content"][0]["text"]
 
