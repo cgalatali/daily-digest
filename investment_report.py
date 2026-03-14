@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 OUTLOOK_EMAIL     = os.environ["OUTLOOK_EMAIL"]
 OUTLOOK_PASSWORD  = os.environ["OUTLOOK_PASSWORD"]
+RECIPIENT_EMAIL   = os.environ.get("RECIPIENT_EMAIL", OUTLOOK_EMAIL)
 
 TODAY = datetime.utcnow().strftime("%d %B %Y")
 TODAY_SHORT = datetime.utcnow().strftime("%Y-%m-%d")
@@ -201,7 +202,7 @@ def call_claude(prompt: str, system: str) -> str:
     """Claude API çağrısı"""
     payload = json.dumps({
         "model": "claude-sonnet-4-6",
-        "max_tokens": 4000,
+        "max_tokens": 8000,
         "system": system,
         "messages": [{"role": "user", "content": prompt}]
     }).encode("utf-8")
@@ -397,11 +398,11 @@ def build_email_html(report_content: str, market_prices: dict) -> str:
 
 
 def send_email(html_content: str, subject: str):
-    """Outlook ile email gönderir"""
+    """Gmail SMTP ile email gönderir"""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = OUTLOOK_EMAIL
-    msg["To"]      = OUTLOOK_EMAIL
+    msg["To"]      = RECIPIENT_EMAIL
 
     msg.attach(MIMEText(html_content, "html", "utf-8"))
 
@@ -409,8 +410,8 @@ def send_email(html_content: str, subject: str):
         server.ehlo()
         server.starttls()
         server.login(OUTLOOK_EMAIL, OUTLOOK_PASSWORD)
-        server.sendmail(OUTLOOK_EMAIL, OUTLOOK_EMAIL, msg.as_string())
-    print(f"Email gönderildi → {OUTLOOK_EMAIL}")
+        server.sendmail(OUTLOOK_EMAIL, RECIPIENT_EMAIL, msg.as_string())
+    print(f"Email gönderildi → {RECIPIENT_EMAIL}")
 
 
 def main():
